@@ -27,9 +27,9 @@ set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
 
-find_package(Boost 1.89.0 REQUIRED)
+find_package(Boost 1.75.0 REQUIRED)
 find_package(Threads REQUIRED)
-
+#kfk
 if(Boost_FOUND)
     message(STATUS "✅ Found Boost ${Boost_VERSION}")
     message(STATUS "    Include dirs: ${Boost_INCLUDE_DIRS}")
