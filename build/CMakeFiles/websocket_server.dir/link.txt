@@ -1,0 +1,1 @@
+/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/websocket_server.dir/websocket_server.cpp.o -o websocket_server  -Wl,-rpath,/opt/homebrew/lib /opt/homebrew/lib/libmongocxx.4.1.4.dylib /opt/homebrew/lib/libbsoncxx.4.1.4.dylib

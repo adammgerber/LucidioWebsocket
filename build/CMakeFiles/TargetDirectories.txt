@@ -1,0 +1,3 @@
+/Users/adamgerber/lucidio-websocket-server/build/CMakeFiles/websocket_server.dir
+/Users/adamgerber/lucidio-websocket-server/build/CMakeFiles/edit_cache.dir
+/Users/adamgerber/lucidio-websocket-server/build/CMakeFiles/rebuild_cache.dir

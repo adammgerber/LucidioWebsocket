@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/adamgerber/lucidio-websocket-server/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
