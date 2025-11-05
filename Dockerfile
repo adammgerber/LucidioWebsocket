@@ -1,6 +1,5 @@
 FROM amazonlinux:2023
 
-# Install dependencies
 RUN yum update -y && yum install -y \
     gcc-c++ \
     make \
@@ -12,10 +11,16 @@ RUN yum update -y && yum install -y \
     wget \
     && yum clean all
 
-# Install MongoDB C driver
-RUN yum install -y mongo-c-driver-devel
+# Build MongoDB C driver from source
+WORKDIR /tmp
+RUN wget https://github.com/mongodb/mongo-c-driver/releases/download/1.24.4/mongo-c-driver-1.24.4.tar.gz && \
+    tar -xzf mongo-c-driver-1.24.4.tar.gz && \
+    cd mongo-c-driver-1.24.4 && \
+    mkdir cmake-build && cd cmake-build && \
+    cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF .. && \
+    make && make install
 
-# Install MongoDB C++ driver
+# Build MongoDB C++ driver
 WORKDIR /tmp
 RUN wget https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.8.0/mongo-cxx-driver-r3.8.0.tar.gz && \
     tar -xzf mongo-cxx-driver-r3.8.0.tar.gz && \
@@ -25,13 +30,10 @@ RUN wget https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.8.0/mo
     cmake --build . --target install
 
 WORKDIR /app
-
 COPY websocket_server.cpp .
 COPY CMakeLists.txt .
 
-RUN mkdir build && cd build && \
-    cmake .. && \
-    make
+RUN mkdir build && cd build && cmake .. && make
 
 EXPOSE 8080
 
