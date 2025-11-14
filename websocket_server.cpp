@@ -266,7 +266,7 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                         auto fdoc = f.get_document().value;
 
                         // TEMP default duration (your agent does not send duration yet)
-                        double duration = 1.0;
+                        double duration = fdoc["duration_ms"].get_int64().value / 1000.0;
 
                         flowsForML << bsoncxx::builder::stream::open_document
                             << "packets" << fdoc["packets"].get_int32().value
