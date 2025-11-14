@@ -151,6 +151,25 @@ std::string call_ml_service(const std::string& jsonPayload) {
     return response;
 }
 
+// Normalize raw ML anomaly score (e.g. -0.25 .. -0.05) into 0.0 ... 1.0
+double normalize_anomaly(double raw) {
+    // Tune these to your model’s typical range
+    const double minVal = -0.30;  // "very normal"
+    const double maxVal = -0.10;  // "least normal"
+
+    double n = (raw - minVal) / (maxVal - minVal);
+
+    if (n < 0.0) n = 0.0;
+    if (n > 1.0) n = 1.0;
+    return n;
+}
+
+// Simple threshold: consider >= 0.75 as an anomaly
+inline bool is_anomalous(double normalized) {
+    return normalized >= 0.75;
+}
+
+
 // Broadcast agent messages to all dashboards belonging to the same user
 void broadcast_to_dashboards(const std::string& user_id, const std::string& message) {
     std::lock_guard<std::mutex> lock(clients_mutex);
@@ -287,6 +306,13 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     bsoncxx::builder::basic::array flowsForML;
                     auto flowsInput = view["topFlows"].get_array().value;
 
+                    // Track how many flows are anomalous (after normalization)
+                    int anomaliesDetected = 0;
+
+                    // Keep original summary so we can reuse packet/byte counts
+                    auto summaryDoc = view["summary"].get_document().value;
+
+
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
 
@@ -382,36 +408,76 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     auto ctx = enriched
                         << "timestamp" << timestampStr
                         << "sensorId"  << view["sensorId"].get_value()
-                        << "summary"   << view["summary"].get_value()
+                        << "summary"   << bsoncxx::builder::stream::open_document
+                        << "totalPackets"      << summaryDoc["totalPackets"].get_int32()
+                        << "totalBytes"        << summaryDoc["totalBytes"].get_int32()
+                        << "activeFlows"       << summaryDoc["activeFlows"].get_int32()
+                        << "anomaliesDetected" << anomaliesDetected
+                    << bsoncxx::builder::stream::close_document
+                        // << "summary"   << view["summary"].get_value()
                         << "protocols" << view["protocols"].get_value()
                         << "anomalies" << view["anomalies"].get_value()
                         << "topFlows"  << bsoncxx::builder::stream::open_array;
 
                     // ---- Add each flow ----
+                    // int i = 0;
+                    // for (auto&& f : flowsInput) {
+                    //     auto fdoc = f.get_document().value;
+                    //     auto sdoc = scores[i].get_document().value;
+
+                    //     // Build a complete document using basic builder
+                    //     bsoncxx::builder::basic::document flowWithML;
+                        
+                    //     // Copy all original field
+                    //     for (auto&& elem : fdoc) {
+                    //         flowWithML.append(bsoncxx::builder::basic::kvp(elem.key(), elem.get_value()));
+                    //     }
+                        
+                    //     // Add ML fields
+                    //     flowWithML.append(
+                    //         bsoncxx::builder::basic::kvp("anomalyScore", sdoc["anomalyScore"].get_double()),
+                    //         bsoncxx::builder::basic::kvp("anomalyLabel", std::string(sdoc["anomalyLabel"].get_string().value))
+                    //     );
+                        
+                    //     // Append the complete document to the array
+                    //     ctx << flowWithML.extract();
+                        
+                    //     i++;
+                    // }
+
                     int i = 0;
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
                         auto sdoc = scores[i].get_document().value;
 
-                        // Build a complete document using basic builder
+                        // Normalize raw score (negative) into 0...1
+                        double rawScore  = sdoc["anomalyScore"].get_double();
+                        double normScore = normalize_anomaly(rawScore);
+
+                        if (is_anomalous(normScore)) {
+                            anomaliesDetected++;
+                        }
+
                         bsoncxx::builder::basic::document flowWithML;
-                        
-                        // Copy all original field
+
+                        // Copy all original fields
                         for (auto&& elem : fdoc) {
                             flowWithML.append(bsoncxx::builder::basic::kvp(elem.key(), elem.get_value()));
                         }
-                        
-                        // Add ML fields
+
+                        // Add normalized ML fields
                         flowWithML.append(
-                            bsoncxx::builder::basic::kvp("anomalyScore", sdoc["anomalyScore"].get_double()),
-                            bsoncxx::builder::basic::kvp("anomalyLabel", std::string(sdoc["anomalyLabel"].get_string().value))
+                            bsoncxx::builder::basic::kvp("anomalyScore", normScore),
+                            bsoncxx::builder::basic::kvp(
+                                "anomalyLabel",
+                                std::string(sdoc["anomalyLabel"].get_string().value)
+                            )
                         );
-                        
-                        // Append the complete document to the array
+
                         ctx << flowWithML.extract();
-                        
                         i++;
                     }
+
 
 
                     // ---- Close array ----
