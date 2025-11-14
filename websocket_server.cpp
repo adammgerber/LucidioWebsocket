@@ -30,7 +30,7 @@ using bsoncxx::builder::stream::finalize;
 // const std::string MONGODB_URI = "mongodb+srv://username:password@cluster.mongodb.net/lucidio?retryWrites=true&w=majority";
 
 const char* mongo_uri_env = std::getenv("MONGODB_URI");
-const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb://localhost:27017/lucidio";
+const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb+srv://adamwgerber:0HvYk4f86aqb217I@cluster0.wkw5cv2.mongodb.net/?appName=Cluster0";
 
 struct ClientInfo {
     std::shared_ptr<websocket::stream<tcp::socket>> ws;
@@ -129,15 +129,31 @@ std::string call_ml_service(const std::string& jsonPayload) {
     std::string response;
 
     if (curl) {
+        struct curl_slist* headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        
         curl_easy_setopt(curl, CURLOPT_URL, "http://ml:8000/analyze_batch");
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
+         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); 
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, jsonPayload.size());
 
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-        curl_easy_perform(curl);
+        CURLcode res = curl_easy_perform(curl);
+        
+        if (res != CURLE_OK) {
+            std::cerr << "cURL error: " << curl_easy_strerror(res) << "\n";
+        } else {
+            long http_code = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+            std::cout << "HTTP response code: " << http_code << "\n";
+        }
+        
+        curl_slist_free_all(headers); 
+
+
         curl_easy_cleanup(curl);
     }
 
@@ -184,6 +200,7 @@ void save_network_data(mongocxx::client& mongo_client, const std::string& json_d
 }
 
 void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
+    std::string last_message;
     try {
         std::cout << "=== DEBUG: Client connection started ===\n";
         
@@ -247,13 +264,31 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
             ws->read(msg_buffer);
             
             std::string message = beast::buffers_to_string(msg_buffer.data());
-            
-            if (!message.empty()) {
-                std::cout << "Received data from agent " << agent_id << "\n";
-                save_network_data(mongo_client, message, user_id, agent_id);
+            last_message = message; 
 
-                auto parsed = bsoncxx::from_json(message);
+            if (!message.empty()) {
+                // Trim whitespace from the message
+            size_t start = message.find_first_not_of(" \t\n\r");
+            size_t end = message.find_last_not_of(" \t\n\r");
+            
+            if (start == std::string::npos) {
+                std::cerr << "IGNORING EMPTY FRAME\n";
+                continue;
+            }
+            
+            message = message.substr(start, end - start + 1);
+            
+            std::cout << "Received data from agent " << agent_id << "\n";
+            std::cout << "Message length: " << message.length() << "\n";
+            
+            // Parse JSON first
+            bsoncxx::document::value parsed = bsoncxx::from_json(message);
+                
+                
+
+                //auto parsed = bsoncxx::from_json(message);
                 auto view = parsed.view();
+                save_network_data(mongo_client, message, user_id, agent_id);
 
                 if (view.find("topFlows") != view.end()) {
 
@@ -264,7 +299,18 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
 
-                        double duration = fdoc["duration_ms"].get_int64() / 1000.0;
+                        // double duration = fdoc["duration_ms"].get_int64() / 1000.0;
+
+                        auto durElem = fdoc["duration_ms"];
+                        double duration = 0.0;
+
+                        if (durElem.type() == bsoncxx::type::k_int32) {
+                            duration = durElem.get_int32().value / 1000.0;
+                        } else if (durElem.type() == bsoncxx::type::k_int64) {
+                            duration = durElem.get_int64().value / 1000.0;
+                        } else {
+                            duration = 0.0;
+                        }
 
                         bsoncxx::builder::basic::document flowDoc;
                         flowDoc.append(
@@ -282,7 +328,18 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     mlDoc.append(bsoncxx::builder::basic::kvp("flows", flowsForML));
 
                     std::string mlPayload = bsoncxx::to_json(mlDoc.view());
-                    std::string mlResult  = call_ml_service(mlPayload);
+                    std::cout << "DEBUG: Calling ML service with payload: " << mlPayload << "\n";
+
+                    std::string mlResult = call_ml_service(mlPayload);
+
+                    std::cout << "DEBUG: ML service response: " << mlResult << "\n";
+                    std::cout << "DEBUG: ML response length: " << mlResult.length() << "\n";
+
+                    if (mlResult.empty() || mlResult.find_first_not_of(" \t\n\r") == std::string::npos) {
+                        std::cerr << "ERROR: ML service returned empty response\n";
+                        broadcast_to_dashboards(user_id, message);
+                        continue;
+                    }
 
                     auto mlJson = bsoncxx::from_json(mlResult);
                     auto mlView = mlJson.view();
@@ -298,8 +355,41 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     // ---- Build enriched JSON ----
                     bsoncxx::builder::stream::document enriched;
 
+                    // ----- Convert timestamp to ISO8601 string -----
+                    std::string timestampStr;
+                    auto tsElem = view["timestamp"];
+
+                    if (tsElem.type() == bsoncxx::type::k_date) {
+                        // Real BSON date from production
+                        auto ts = tsElem.get_date().value;
+                        auto millis = ts.count();
+                        std::time_t t = millis / 1000;
+                        std::tm tm = *std::gmtime(&t);
+                        char buffer[32];
+                        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &tm);
+                        timestampStr = std::string(buffer);
+                    } else if (tsElem.type() == bsoncxx::type::k_int32 || tsElem.type() == bsoncxx::type::k_int64) {
+                        // Test data with integer timestamp
+                        int64_t millis = (tsElem.type() == bsoncxx::type::k_int32) 
+                            ? tsElem.get_int32().value 
+                            : tsElem.get_int64().value;
+                        std::time_t t = millis / 1000;
+                        std::tm tm = *std::gmtime(&t);
+                        char buffer[32];
+                        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &tm);
+                        timestampStr = std::string(buffer);
+                    } else {
+                        // Fallback: use current time
+                        auto now = std::chrono::system_clock::now();
+                        std::time_t t = std::chrono::system_clock::to_time_t(now);
+                        std::tm tm = *std::gmtime(&t);
+                        char buffer[32];
+                        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &tm);
+                        timestampStr = std::string(buffer);
+                    }
+
                     auto ctx = enriched
-                        << "timestamp" << view["timestamp"].get_value()
+                        << "timestamp" << timestampStr
                         << "sensorId"  << view["sensorId"].get_value()
                         << "summary"   << view["summary"].get_value()
                         << "protocols" << view["protocols"].get_value()
@@ -338,6 +428,12 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
 
 
                     std::string finalPayload = bsoncxx::to_json(enriched.view());
+
+                    std::cout << "\n=== FINAL PAYLOAD SENT TO DASHBOARD ===\n";
+                    std::cout << finalPayload << "\n";
+                    std::cout << "=======================================\n";
+
+
                     broadcast_to_dashboards(user_id, finalPayload);
                 }
                 else {
@@ -353,6 +449,7 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
         
     } catch (const std::exception& e) {
         std::cerr << "Client handler error: " << e.what() << "\n";
+        std::cerr << "STACK TRACE OCCURRED DURING MESSAGE:\n" << last_message << "\n";
         
         // Remove client from list on disconnect
         // (implement cleanup logic here)
