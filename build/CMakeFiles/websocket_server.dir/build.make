@@ -97,6 +97,8 @@ websocket_server: CMakeFiles/websocket_server.dir/websocket_server.cpp.o
 websocket_server: CMakeFiles/websocket_server.dir/build.make
 websocket_server: /opt/homebrew/lib/libmongocxx.4.1.4.dylib
 websocket_server: /opt/homebrew/lib/libbsoncxx.4.1.4.dylib
+websocket_server: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libcurl.tbd
+websocket_server: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libcurl.tbd
 websocket_server: CMakeFiles/websocket_server.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/adamgerber/lucidio-websocket-server/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable websocket_server"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/websocket_server.dir/link.txt --verbose=$(VERBOSE)
