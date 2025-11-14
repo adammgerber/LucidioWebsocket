@@ -30,7 +30,7 @@ using bsoncxx::builder::stream::finalize;
 // const std::string MONGODB_URI = "mongodb+srv://username:password@cluster.mongodb.net/lucidio?retryWrites=true&w=majority";
 
 const char* mongo_uri_env = std::getenv("MONGODB_URI");
-const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb+srv://adamwgerber:0HvYk4f86aqb217I@cluster0.wkw5cv2.mongodb.net/?appName=Cluster0";
+const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb://localhost:27017";
 
 struct ClientInfo {
     std::shared_ptr<websocket::stream<tcp::socket>> ws;
@@ -71,16 +71,7 @@ bool validate_api_key(mongocxx::client& client, const std::string& api_key,
         auto db = client["test"];
         auto collection = db["apikeys"];
         
-        // First, let's see ALL keys in the database
-        std::cout << "DEBUG: Checking all API keys in database:\n";
-        auto cursor = collection.find({});
-        int count = 0;
-        for (auto&& doc : cursor) {
-            count++;
-            std::cout << "  Key " << count << ": " << bsoncxx::to_json(doc) << "\n";
-        }
-        std::cout << "DEBUG: Total keys found: " << count << "\n";
-        
+       
         auto query = document{} 
             << "key" << api_key 
             << "status" << "active" 
