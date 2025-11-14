@@ -28,6 +28,7 @@ set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
 
 find_package(Boost 1.75.0 REQUIRED)
+find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
 #kfk
 if(Boost_FOUND)
@@ -58,6 +59,7 @@ target_link_libraries(websocket_server
     Threads::Threads
     mongo::mongocxx_shared
     mongo::bsoncxx_shared
+    CURL::libcurl
 )
 
 target_include_directories(websocket_server PRIVATE 

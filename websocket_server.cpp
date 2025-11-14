@@ -252,84 +252,100 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                 std::cout << "Received data from agent " << agent_id << "\n";
                 save_network_data(mongo_client, message, user_id, agent_id);
 
-                // Build payload for ML service
                 auto parsed = bsoncxx::from_json(message);
                 auto view = parsed.view();
 
-                if (view.find("top_flows") != view.end()) {
+                if (view.find("topFlows") != view.end()) {
 
-                    // ---- Build ML input array ----
-                    bsoncxx::builder::stream::array flowsForML;
-                    auto flowsInput = view["top_flows"].get_array().value;
+                    // ---- Build ML input ----
+                    bsoncxx::builder::basic::array flowsForML;
+                    auto flowsInput = view["topFlows"].get_array().value;
 
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
 
-                        // TEMP default duration (your agent does not send duration yet)
-                        double duration = fdoc["duration_ms"].get_int64().value / 1000.0;
+                        double duration = fdoc["duration_ms"].get_int64() / 1000.0;
 
-                        flowsForML << bsoncxx::builder::stream::open_document
-                            << "packets" << fdoc["packets"].get_int32().value
-                            << "bytes"   << fdoc["bytes"].get_int32().value
-                            << "duration" << duration
-                            << "entropy" << fdoc["entropy"].get_double().value
-                        << bsoncxx::builder::stream::close_document;
+                        bsoncxx::builder::basic::document flowDoc;
+                        flowDoc.append(
+                            bsoncxx::builder::basic::kvp("packets",  fdoc["packets"].get_int32()),
+                            bsoncxx::builder::basic::kvp("bytes",    fdoc["bytes"].get_int32()),
+                            bsoncxx::builder::basic::kvp("duration", duration),
+                            bsoncxx::builder::basic::kvp("entropy",  fdoc["entropy"].get_double())
+                        );
+
+                        flowsForML.append(flowDoc);
                     }
 
-                    bsoncxx::builder::stream::document mlDoc;
-                    mlDoc << "flows" << flowsForML;
+                    // ---- Call ML ----
+                    bsoncxx::builder::basic::document mlDoc;
+                    mlDoc.append(bsoncxx::builder::basic::kvp("flows", flowsForML));
 
                     std::string mlPayload = bsoncxx::to_json(mlDoc.view());
                     std::string mlResult  = call_ml_service(mlPayload);
 
-                    // ---- Parse ML output ----
                     auto mlJson = bsoncxx::from_json(mlResult);
-                    if (!mlJson.view().find("scores")) {
-                        // ML failed = send raw instead of crashing
+                    auto mlView = mlJson.view();
+
+                    if (mlView.find("scores") == mlView.end()) {
                         broadcast_to_dashboards(user_id, message);
                         continue;
                     }
 
-                    auto scores = mlJson.view()["scores"].get_array().value;
+                    auto scores = mlView["scores"].get_array().value;
 
+                    // ---- Build enriched ----
                     // ---- Build enriched JSON ----
                     bsoncxx::builder::stream::document enriched;
-                    enriched << "timestamp" << view["timestamp"]
-                            << "sensorId" << view["sensor_id"]
-                            << "summary" << view["summary"]
-                            << "protocols" << view["protocols"]
-                            << "anomalies" << view["anomalies"];
 
-                    bsoncxx::builder::stream::array top;
+                    auto ctx = enriched
+                        << "timestamp" << view["timestamp"].get_value()
+                        << "sensorId"  << view["sensorId"].get_value()
+                        << "summary"   << view["summary"].get_value()
+                        << "protocols" << view["protocols"].get_value()
+                        << "anomalies" << view["anomalies"].get_value()
+                        << "topFlows"  << bsoncxx::builder::stream::open_array;
 
+                    // ---- Add each flow ----
                     int i = 0;
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
                         auto sdoc = scores[i].get_document().value;
 
-                        bsoncxx::builder::stream::document merged;
+                        // Build a complete document using basic builder
+                        bsoncxx::builder::basic::document flowWithML;
+                        
+                        // Copy all original field
                         for (auto&& elem : fdoc) {
-                            merged << elem.key() << elem.get_value();
+                            flowWithML.append(bsoncxx::builder::basic::kvp(elem.key(), elem.get_value()));
                         }
-                        merged << "anomalyScore" << sdoc["anomalyScore"].get_double().value;
-                        merged << "anomalyLabel" << sdoc["anomalyLabel"].get_utf8().value;
-
-                        top << merged;
+                        
+                        // Add ML fields
+                        flowWithML.append(
+                            bsoncxx::builder::basic::kvp("anomalyScore", sdoc["anomalyScore"].get_double()),
+                            bsoncxx::builder::basic::kvp("anomalyLabel", std::string(sdoc["anomalyLabel"].get_string().value))
+                        );
+                        
+                        // Append the complete document to the array
+                        ctx << flowWithML.extract();
+                        
                         i++;
                     }
 
-                    enriched << "topFlows" << top;
+
+                    // ---- Close array ----
+                    ctx << bsoncxx::builder::stream::close_array;
+
 
                     std::string finalPayload = bsoncxx::to_json(enriched.view());
                     broadcast_to_dashboards(user_id, finalPayload);
                 }
                 else {
-                    broadcast_to_dashboards(user_id, message); // fallback
+                    broadcast_to_dashboards(user_id, message);
                 }
 
-
-
             }
+
 
             
             msg_buffer.clear();

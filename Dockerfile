@@ -6,6 +6,7 @@ RUN yum update -y && yum install -y \
     cmake \
     boost-devel \
     openssl-devel \
+    libcurl-devel \
     git \
     tar \
     wget \
