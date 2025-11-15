@@ -464,7 +464,9 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
 
 
                     // ---- Close array ----
-                    ctx << bsoncxx::builder::stream::close_array;
+                    enriched << bsoncxx::builder::stream::close_array
+                     << bsoncxx::builder::stream::finalize;
+                    //ctx << bsoncxx::builder::stream::close_array;
 
 
                     std::string finalPayload = bsoncxx::to_json(enriched.view());
