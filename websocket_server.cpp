@@ -30,7 +30,7 @@ using bsoncxx::builder::stream::finalize;
 // const std::string MONGODB_URI = "mongodb+srv://username:password@cluster.mongodb.net/lucidio?retryWrites=true&w=majority";
 
 const char* mongo_uri_env = std::getenv("MONGODB_URI");
-const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb://localhost:27017";
+const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb+srv://adamwgerber:0HvYk4f86aqb217I@cluster0.wkw5cv2.mongodb.net/?appName=Cluster0";
 
 struct ClientInfo {
     std::shared_ptr<websocket::stream<tcp::socket>> ws;
@@ -123,7 +123,8 @@ std::string call_ml_service(const std::string& jsonPayload) {
         struct curl_slist* headers = NULL;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         
-        curl_easy_setopt(curl, CURLOPT_URL, "http://ml:8000/analyze_batch");
+        //curl_easy_setopt(curl, CURLOPT_URL, "http://ml:8000/analyze_batch");
+        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:8000/analyze_batch");
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
          curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); 
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
@@ -293,11 +294,10 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
             
             // Parse JSON first
             bsoncxx::document::value parsed = bsoncxx::from_json(message);
+            std::cout << "Parsed JSON: " << bsoncxx::to_json(parsed.view()) << "\n";
                 
-                
-
-                //auto parsed = bsoncxx::from_json(message);
                 auto view = parsed.view();
+                std::cout << "Now attempting to save network data..." << "\n";
                 save_network_data(mongo_client, message, user_id, agent_id);
 
                 if (view.find("topFlows") != view.end()) {
@@ -418,32 +418,6 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                         << "protocols" << view["protocols"].get_value()
                         << "anomalies" << view["anomalies"].get_value()
                         << "topFlows"  << bsoncxx::builder::stream::open_array;
-
-                    // ---- Add each flow ----
-                    // int i = 0;
-                    // for (auto&& f : flowsInput) {
-                    //     auto fdoc = f.get_document().value;
-                    //     auto sdoc = scores[i].get_document().value;
-
-                    //     // Build a complete document using basic builder
-                    //     bsoncxx::builder::basic::document flowWithML;
-                        
-                    //     // Copy all original field
-                    //     for (auto&& elem : fdoc) {
-                    //         flowWithML.append(bsoncxx::builder::basic::kvp(elem.key(), elem.get_value()));
-                    //     }
-                        
-                    //     // Add ML fields
-                    //     flowWithML.append(
-                    //         bsoncxx::builder::basic::kvp("anomalyScore", sdoc["anomalyScore"].get_double()),
-                    //         bsoncxx::builder::basic::kvp("anomalyLabel", std::string(sdoc["anomalyLabel"].get_string().value))
-                    //     );
-                        
-                    //     // Append the complete document to the array
-                    //     ctx << flowWithML.extract();
-                        
-                    //     i++;
-                    // }
 
                     int i = 0;
                     for (auto&& f : flowsInput) {
