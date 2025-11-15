@@ -354,7 +354,12 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
 
                     if (mlResult.empty() || mlResult.find_first_not_of(" \t\n\r") == std::string::npos) {
                         std::cerr << "ERROR: ML service returned empty response\n";
-                        broadcast_to_dashboards(user_id, message);
+                        //broadcast_to_dashboards(user_id, message);
+                        try {
+                            broadcast_to_dashboards(user_id, message);
+                        } catch (const std::exception& broadcast_error) {
+                            std::cerr << "⚠️ Broadcast error (non-fatal): " << broadcast_error.what() << "\n";
+                        }
                         continue;
                     }
 
@@ -362,7 +367,11 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     auto mlView = mlJson.view();
 
                     if (mlView.find("scores") == mlView.end()) {
-                        broadcast_to_dashboards(user_id, message);
+                        try {
+                            broadcast_to_dashboards(user_id, message);
+                        } catch (const std::exception& broadcast_error) {
+                            std::cerr << "⚠️ Broadcast error (non-fatal): " << broadcast_error.what() << "\n";
+                        }
                         continue;
                     }
 
@@ -465,10 +474,20 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     std::cout << "=======================================\n";
 
 
-                    broadcast_to_dashboards(user_id, finalPayload);
+                    //broadcast_to_dashboards(user_id, finalPayload);
+                    try {
+                        broadcast_to_dashboards(user_id, finalPayload);
+                    } catch (const std::exception& broadcast_error) {
+                        std::cerr << "⚠️ Broadcast error (non-fatal): " << broadcast_error.what() << "\n";
+                    }
                 }
                 else {
-                    broadcast_to_dashboards(user_id, message);
+                   // broadcast_to_dashboards(user_id, message);
+                   try {
+                        broadcast_to_dashboards(user_id, message);
+                    } catch (const std::exception& broadcast_error) {
+                        std::cerr << "⚠️ Broadcast error (non-fatal): " << broadcast_error.what() << "\n";
+                    }
                 }
 
             }
