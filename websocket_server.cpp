@@ -301,40 +301,114 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                 save_network_data(mongo_client, message, user_id, agent_id);
 
                 if (view.find("topFlows") != view.end()) {
+                    int anomaliesDetected = 0;
+                    auto summaryDoc = view["summary"].get_document().value;
 
                     // ---- Build ML input ----
                     bsoncxx::builder::basic::array flowsForML;
                     auto flowsInput = view["topFlows"].get_array().value;
 
-                    // Track how many flows are anomalous (after normalization)
-                    int anomaliesDetected = 0;
-
-                    // Keep original summary so we can reuse packet/byte counts
-                    auto summaryDoc = view["summary"].get_document().value;
-
-
                     for (auto&& f : flowsInput) {
                         auto fdoc = f.get_document().value;
 
-                        // double duration = fdoc["duration_ms"].get_int64() / 1000.0;
+                        // Helper function to safely get values
+                        auto getInt = [&](const char* key) -> int32_t {
+                            auto elem = fdoc[key];
+                            if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
+                            if (elem.type() == bsoncxx::type::k_int64) return static_cast<int32_t>(elem.get_int64().value);
+                            return 0;
+                        };
 
-                        auto durElem = fdoc["duration_ms"];
-                        double duration = 0.0;
-
-                        if (durElem.type() == bsoncxx::type::k_int32) {
-                            duration = durElem.get_int32().value / 1000.0;
-                        } else if (durElem.type() == bsoncxx::type::k_int64) {
-                            duration = durElem.get_int64().value / 1000.0;
-                        } else {
-                            duration = 0.0;
-                        }
+                        auto getDouble = [&](const char* key) -> double {
+                            auto elem = fdoc[key];
+                            if (elem.type() == bsoncxx::type::k_double) return elem.get_double().value;
+                            if (elem.type() == bsoncxx::type::k_int32) return static_cast<double>(elem.get_int32().value);
+                            if (elem.type() == bsoncxx::type::k_int64) return static_cast<double>(elem.get_int64().value);
+                            return 0.0;
+                        };
 
                         bsoncxx::builder::basic::document flowDoc;
                         flowDoc.append(
-                            bsoncxx::builder::basic::kvp("packets",  fdoc["packets"].get_int32()),
-                            bsoncxx::builder::basic::kvp("bytes",    fdoc["bytes"].get_int32()),
-                            bsoncxx::builder::basic::kvp("duration", duration),
-                            bsoncxx::builder::basic::kvp("entropy",  fdoc["entropy"].get_double())
+                            // Basic stats
+                            bsoncxx::builder::basic::kvp("bytes", getDouble("bytes")),
+                            bsoncxx::builder::basic::kvp("packets", getDouble("packets")),
+                            bsoncxx::builder::basic::kvp("inbound_bytes", getDouble("inbound_bytes")),
+                            bsoncxx::builder::basic::kvp("outbound_bytes", getDouble("outbound_bytes")),
+                            
+                            // Packet statistics
+                            bsoncxx::builder::basic::kvp("packet_size_mean", getDouble("packet_size_mean")),
+                            bsoncxx::builder::basic::kvp("packet_size_variance", getDouble("packet_size_variance")),
+                            
+                            // Buckets
+                            bsoncxx::builder::basic::kvp("volume_bucket", getDouble("volume_bucket")),
+                            bsoncxx::builder::basic::kvp("packet_bucket", getDouble("packet_bucket")),
+                            
+                            // Timing
+                            bsoncxx::builder::basic::kvp("flow_duration_ms", getDouble("flow_duration_ms")),
+                            bsoncxx::builder::basic::kvp("iat_mean", getDouble("iat_mean")),
+                            bsoncxx::builder::basic::kvp("iat_variance", getDouble("iat_variance")),
+                            
+                            // Burst
+                            bsoncxx::builder::basic::kvp("burst_count", getDouble("burst_count")),
+                            bsoncxx::builder::basic::kvp("burst_current", getDouble("burst_current")),
+                            
+                            // Time of day
+                            bsoncxx::builder::basic::kvp("hour_of_day", getDouble("hour_of_day")),
+                            bsoncxx::builder::basic::kvp("minute_of_day", getDouble("minute_of_day")),
+                            bsoncxx::builder::basic::kvp("lifetime_bucket", getDouble("lifetime_bucket")),
+                            
+                            // TCP flags
+                            bsoncxx::builder::basic::kvp("syn_count", getDouble("tcp_syn")),
+                            bsoncxx::builder::basic::kvp("fin_count", getDouble("tcp_fin")),
+                            bsoncxx::builder::basic::kvp("rst_count", getDouble("tcp_rst")),
+                            bsoncxx::builder::basic::kvp("ack_count", getDouble("tcp_ack")),
+                            bsoncxx::builder::basic::kvp("is_closed", getDouble("is_closed")),
+                            
+                            // Direction and locality
+                            bsoncxx::builder::basic::kvp("is_outbound", getDouble("outbound_bytes") > 0 ? 1.0 : 0.0),
+                            bsoncxx::builder::basic::kvp("is_inbound", getDouble("inbound_bytes") > 0 ? 1.0 : 0.0),
+                            bsoncxx::builder::basic::kvp("client_is_local", getDouble("client_is_local")),
+                            bsoncxx::builder::basic::kvp("server_is_local", getDouble("server_is_local")),
+                            bsoncxx::builder::basic::kvp("role_determined", getDouble("role_determined")),
+                            
+                            // Layer 7 protocols
+                            bsoncxx::builder::basic::kvp("l7_http", getDouble("l7_http")),
+                            bsoncxx::builder::basic::kvp("l7_tls", getDouble("l7_tls")),
+                            bsoncxx::builder::basic::kvp("l7_dns", getDouble("l7_dns")),
+                            bsoncxx::builder::basic::kvp("l7_mdns", getDouble("l7_mdns")),
+                            bsoncxx::builder::basic::kvp("l7_ssdp", getDouble("l7_ssdp")),
+                            
+                            // TLS details
+                            bsoncxx::builder::basic::kvp("tls_seen", getDouble("tls_seen")),
+                            bsoncxx::builder::basic::kvp("tls_first_content_type", getDouble("tls_first_content_type")),
+                            bsoncxx::builder::basic::kvp("tls_first_version_major", getDouble("tls_first_version_major")),
+                            bsoncxx::builder::basic::kvp("tls_first_version_minor", getDouble("tls_first_version_minor")),
+                            bsoncxx::builder::basic::kvp("tls_handshake_count", getDouble("tls_handshake_count")),
+                            bsoncxx::builder::basic::kvp("tls_appdata_count", getDouble("tls_appdata_count")),
+                            bsoncxx::builder::basic::kvp("tls_alert_count", getDouble("tls_alert_count")),
+                            bsoncxx::builder::basic::kvp("tls_heartbeat_count", getDouble("tls_heartbeat_count")),
+                            
+                            // HTTP details
+                            bsoncxx::builder::basic::kvp("http_seen", getDouble("http_seen")),
+                            bsoncxx::builder::basic::kvp("http_is_response", getDouble("http_is_response")),
+                            
+                            // DNS details
+                            bsoncxx::builder::basic::kvp("dns_seen", getDouble("dns_seen")),
+                            bsoncxx::builder::basic::kvp("dns_query_type", getDouble("dns_query_type")),
+                            bsoncxx::builder::basic::kvp("dns_query_class", getDouble("dns_query_class")),
+                            
+                            // Entropy and protocol
+                            bsoncxx::builder::basic::kvp("payload_entropy", getDouble("payload_entropy")),
+                            bsoncxx::builder::basic::kvp("protocol", [&]() -> double {
+                                auto proto = fdoc["protocol"];
+                                if (proto.type() == bsoncxx::type::k_string) {
+                                    std::string p(proto.get_string().value);
+                                    if (p == "TCP") return 6.0;
+                                    if (p == "UDP") return 17.0;
+                                    if (p == "ICMP") return 1.0;
+                                }
+                                return getDouble("protocol");
+                            }())
                         );
 
                         flowsForML.append(flowDoc);
@@ -345,9 +419,57 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                     mlDoc.append(bsoncxx::builder::basic::kvp("flows", flowsForML));
 
                     std::string mlPayload = bsoncxx::to_json(mlDoc.view());
-                    std::cout << "DEBUG: Calling ML service with payload: " << mlPayload << "\n";
+                    std::cout << "DEBUG: Calling ML service with payload (truncated): " 
+                            << mlPayload.substr(0, 200) << "..." << "\n";
 
                     std::string mlResult = call_ml_service(mlPayload);
+
+                    // // ---- Build ML input ----
+                    // bsoncxx::builder::basic::array flowsForML;
+                    // auto flowsInput = view["topFlows"].get_array().value;
+
+                    // // Track how many flows are anomalous (after normalization)
+                    // int anomaliesDetected = 0;
+
+                    // // Keep original summary so we can reuse packet/byte counts
+                    // auto summaryDoc = view["summary"].get_document().value;
+
+
+                    // for (auto&& f : flowsInput) {
+                    //     auto fdoc = f.get_document().value;
+
+                    //     // double duration = fdoc["duration_ms"].get_int64() / 1000.0;
+
+                    //     auto durElem = fdoc["duration_ms"];
+                    //     double duration = 0.0;
+
+                    //     if (durElem.type() == bsoncxx::type::k_int32) {
+                    //         duration = durElem.get_int32().value / 1000.0;
+                    //     } else if (durElem.type() == bsoncxx::type::k_int64) {
+                    //         duration = durElem.get_int64().value / 1000.0;
+                    //     } else {
+                    //         duration = 0.0;
+                    //     }
+
+                    //     bsoncxx::builder::basic::document flowDoc;
+                    //     flowDoc.append(
+                    //         bsoncxx::builder::basic::kvp("packets",  fdoc["packets"].get_int32()),
+                    //         bsoncxx::builder::basic::kvp("bytes",    fdoc["bytes"].get_int32()),
+                    //         bsoncxx::builder::basic::kvp("duration", duration),
+                    //         bsoncxx::builder::basic::kvp("entropy",  fdoc["entropy"].get_double())
+                    //     );
+
+                    //     flowsForML.append(flowDoc);
+                    // }
+
+                    // // ---- Call ML ----
+                    // bsoncxx::builder::basic::document mlDoc;
+                    // mlDoc.append(bsoncxx::builder::basic::kvp("flows", flowsForML));
+
+                    // std::string mlPayload = bsoncxx::to_json(mlDoc.view());
+                    // std::cout << "DEBUG: Calling ML service with payload: " << mlPayload << "\n";
+
+                    // std::string mlResult = call_ml_service(mlPayload);
 
                     std::cout << "DEBUG: ML service response: " << mlResult << "\n";
                     std::cout << "DEBUG: ML response length: " << mlResult.length() << "\n";
