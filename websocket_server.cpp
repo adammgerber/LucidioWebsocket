@@ -418,12 +418,11 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                         << "timestamp" << timestampStr
                         << "sensorId"  << view["sensorId"].get_value()
                         << "summary"   << bsoncxx::builder::stream::open_document
-                        << "totalPackets"      << summaryDoc["totalPackets"].get_int32()
-                        << "totalBytes"        << summaryDoc["totalBytes"].get_int32()
-                        << "activeFlows"       << summaryDoc["activeFlows"].get_int32()
-                        << "anomaliesDetected" << anomaliesDetected
-                    << bsoncxx::builder::stream::close_document
-                        // << "summary"   << view["summary"].get_value()
+                            << "totalPackets"      << summaryDoc["totalPackets"].get_int32()
+                            << "totalBytes"        << summaryDoc["totalBytes"].get_int32()
+                            << "activeFlows"       << summaryDoc["activeFlows"].get_int32()
+                            << "anomaliesDetected" << anomaliesDetected
+                        << bsoncxx::builder::stream::close_document
                         << "protocols" << view["protocols"].get_value()
                         << "anomalies" << view["anomalies"].get_value()
                         << "topFlows"  << bsoncxx::builder::stream::open_array;
@@ -433,7 +432,6 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                         auto fdoc = f.get_document().value;
                         auto sdoc = scores[i].get_document().value;
 
-                        // Normalize raw score (negative) into 0...1
                         double rawScore  = sdoc["anomalyScore"].get_double();
                         double normScore = normalize_anomaly(rawScore);
 
@@ -443,12 +441,10 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
 
                         bsoncxx::builder::basic::document flowWithML;
 
-                        // Copy all original fields
                         for (auto&& elem : fdoc) {
                             flowWithML.append(bsoncxx::builder::basic::kvp(elem.key(), elem.get_value()));
                         }
 
-                        // Add normalized ML fields
                         flowWithML.append(
                             bsoncxx::builder::basic::kvp("anomalyScore", normScore),
                             bsoncxx::builder::basic::kvp(
@@ -461,15 +457,11 @@ void handle_client(tcp::socket socket, mongocxx::client& mongo_client) {
                         i++;
                     }
 
+                    // Close array and finalize
+                    auto finalDoc = ctx << bsoncxx::builder::stream::close_array
+                                        << bsoncxx::builder::stream::finalize;
 
-
-                    // ---- Close array ----
-                    enriched << bsoncxx::builder::stream::close_array
-                     << bsoncxx::builder::stream::finalize;
-                    //ctx << bsoncxx::builder::stream::close_array;
-
-
-                    std::string finalPayload = bsoncxx::to_json(enriched.view());
+                    std::string finalPayload = bsoncxx::to_json(finalDoc.view());
 
                     std::cout << "\n=== FINAL PAYLOAD SENT TO DASHBOARD ===\n";
                     std::cout << finalPayload << "\n";
