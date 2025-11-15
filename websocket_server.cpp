@@ -30,7 +30,7 @@ using bsoncxx::builder::stream::finalize;
 // const std::string MONGODB_URI = "mongodb+srv://username:password@cluster.mongodb.net/lucidio?retryWrites=true&w=majority";
 
 const char* mongo_uri_env = std::getenv("MONGODB_URI");
-const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb+srv://adamwgerber:0HvYk4f86aqb217I@cluster0.wkw5cv2.mongodb.net/?appName=Cluster0";
+const std::string MONGODB_URI = mongo_uri_env ? mongo_uri_env : "mongodb+srv://localhost:27001";
 
 struct ClientInfo {
     std::shared_ptr<websocket::stream<tcp::socket>> ws;
@@ -123,8 +123,8 @@ std::string call_ml_service(const std::string& jsonPayload) {
         struct curl_slist* headers = NULL;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         
-        //curl_easy_setopt(curl, CURLOPT_URL, "http://ml:8000/analyze_batch");
-        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:8000/analyze_batch");
+        curl_easy_setopt(curl, CURLOPT_URL, "http://ml:8000/analyze_batch");
+       // curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:8000/analyze_batch");
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
          curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); 
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
